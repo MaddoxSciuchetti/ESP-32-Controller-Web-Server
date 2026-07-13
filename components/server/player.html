@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>maddox-os player</title>
+<style>
+  :root {
+    --tile-a:#d32f2f;
+    --tile-b:#1976d2;
+    --tile-c:#f9a825;
+    --tile-d:#388e3c;
+  }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,sans-serif; background:#fff; color:#000; margin:0; padding:20px; }
+  h1 { color:#000; margin:0 0 4px; }
+  .sub { color:#000; margin:0 0 20px; opacity:.72; }
+  .question { font-size:1.25rem; line-height:1.35; margin:20px 0; color:#000; }
+  .answers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; min-height:60vh; }
+  button { width:100%; min-height:180px; border:0; border-radius:8px; color:white; font-size:3.5rem; font-weight:900; }
+  .tile-0 { background:var(--tile-a); }
+  .tile-1 { background:var(--tile-b); }
+  .tile-2 { background:var(--tile-c); color:#000; }
+  .tile-3 { background:var(--tile-d); }
+  button.selected { outline:5px solid white; transform:scale(.98); }
+  button.correct { outline:5px solid #fff; outline-offset:-10px; }
+  button.wrong { opacity:.55; }
+  .status { margin-top:16px; color:#000; opacity:.72; }
+  .pill { display:inline-block; background:#fff; color:#000; border:1px solid #000; border-radius:999px; padding:4px 9px; margin-right:6px; }
+  @media (max-width:520px) { button { min-height:150px; font-size:3rem; } }
+</style>
+</head>
+<body>
+<h1>maddox-os</h1>
+<p class="sub"><span class="pill" id="phase">idle</span><span id="progress"></span></p>
+<div class="question" id="question">Waiting for host...</div>
+<div class="answers" id="answers"></div>
+<div class="status" id="status"></div>
+
+<script>
+let currentSession = -1;
+let selected = null;
+let clientId = localStorage.getItem('maddoxClientId');
+if (!clientId) {
+  clientId = Math.random().toString(36).slice(2) + Date.now().toString(36).slice(-6);
+  localStorage.setItem('maddoxClientId', clientId);
+}
+
+async function vote(option) {
+  selected = option;
+  await fetch('/api/game/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: clientId, option }),
+  });
+  await load();
+}
+
+function render(s) {
+  document.getElementById('phase').textContent = s.phase;
+  document.getElementById('progress').textContent =
+    s.question_index >= 0 ? 'Question ' + (s.question_index + 1) + ' of ' + s.question_count : '';
+
+  if (s.session_id !== currentSession) {
+    currentSession = s.session_id;
+    selected = null;
+  }
+
+  if (s.phase === 'idle') {
+    document.getElementById('question').textContent = 'Waiting for host to start.';
+    document.getElementById('answers').innerHTML = '';
+    document.getElementById('status').textContent = '';
+    return;
+  }
+  if (s.phase === 'done') {
+    document.getElementById('question').textContent = 'Session complete.';
+    document.getElementById('answers').innerHTML = '';
+    document.getElementById('status').textContent = 'Thanks for playing.';
+    return;
+  }
+
+  document.getElementById('question').textContent =
+    s.phase === 'open' ? 'Choose the matching tile shown on the host screen.' : 'Answer revealed on host screen.';
+  const revealed = s.phase === 'revealed';
+  document.getElementById('answers').innerHTML = s.options.map((_, i) => {
+    let cls = selected === i ? 'selected' : '';
+    if (revealed && i === s.correct_index) cls = 'correct';
+    else if (revealed && selected === i) cls = 'wrong';
+    return '<button class="tile-' + i + ' ' + cls + '" ' + (s.phase === 'open' ? '' : 'disabled') +
+      ' onclick="vote(' + i + ')">' + String.fromCharCode(65 + i) + '</button>';
+  }).join('');
+  document.getElementById('status').textContent =
+    revealed ? 'Correct answer shown.' : (selected === null ? 'Choose an answer.' : 'Answer submitted. You can change it until reveal.');
+}
+
+async function load() {
+  const r = await fetch('/api/game/state');
+  render(await r.json());
+}
+
+load();
+setInterval(load, 800);
+</script>
+</body>
+</html>

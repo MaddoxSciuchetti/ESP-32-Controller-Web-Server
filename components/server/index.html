@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>maddox-os</title>
+<style>
+  :root { --accent: #4fc3f7; --card: #1c1c1e; --muted: #9e9e9e; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, sans-serif;
+    background: #111; color: #eee;
+    margin: 0; padding: 24px;
+    max-width: 900px; margin-inline: auto;
+  }
+  h1 { color: var(--accent); margin: 0 0 4px; }
+  h2 { font-size: 1rem; color: var(--muted); text-transform: uppercase;
+       letter-spacing: 1px; margin: 28px 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+          gap: 12px; }
+  .card { background: var(--card); border-radius: 10px; padding: 14px 16px; }
+  .card .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase;
+                 letter-spacing: 1px; }
+  .card .value { font-size: 1.25rem; margin-top: 4px; word-break: break-all; }
+  input, button {
+    font-size: 1rem; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid #3a3a3c;
+  }
+  input { background: #222; color: #eee; width: 100%; margin-bottom: 10px; }
+  button { background: var(--accent); color: #111; border: none;
+           cursor: pointer; font-weight: 600; }
+  button.danger { background: #e57373; }
+  form { max-width: 360px; }
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+  .note { font-size: 0.85rem; color: var(--muted); margin-top: 10px; }
+  #dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+         background: #66bb6a; margin-right: 6px; }
+  #dot.offline { background: #e57373; }
+  .seg { display: inline-flex; border: 1px solid #3a3a3c; border-radius: 8px;
+         overflow: hidden; margin-bottom: 14px; }
+  .seg button { background: #222; color: var(--muted); border: none;
+                border-radius: 0; font-weight: 500; }
+  .seg button.active { background: var(--accent); color: #111; font-weight: 600; }
+  input:disabled, button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid #3a3a3c;
+          margin-bottom: 8px; }
+  .tabs button {
+    background: none; color: var(--muted); border: none; border-radius: 8px 8px 0 0;
+    padding: 10px 18px; font-size: 1rem; font-weight: 500;
+  }
+  .tabs button.active { background: var(--card); color: var(--accent); font-weight: 600; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+</style>
+</head>
+<body>
+<h1>maddox-os</h1>
+<p class="sub"><span id="dot"></span><span id="conn">connecting…</span></p>
+
+<div class="tabs">
+  <button id="tab-btn-main" class="active" onclick="showTab('main')">Main</button>
+  <button id="tab-btn-metrics" onclick="showTab('metrics')">Metrics</button>
+  <button id="tab-btn-config" onclick="showTab('config')">Config</button>
+</div>
+
+<div id="tab-main" class="tab active">
+  <h2>At a glance</h2>
+  <div class="grid" id="grid-main"></div>
+
+  <h2>OLED screen</h2>
+  <div class="seg">
+    <button id="mode-stock" onclick="setMode('stock')">Stock price</button>
+    <button id="mode-message" onclick="setMode('message')">Custom message</button>
+  </div>
+  <form onsubmit="sendMessage(event)">
+    <label for="msg">Text to show on the display (max 60 chars)</label>
+    <input id="msg" maxlength="60" placeholder="Hello Maddox">
+    <button id="msg-send">Send to display</button>
+    <div class="note" id="msg-result"></div>
+  </form>
+</div>
+
+<div id="tab-metrics" class="tab">
+  <h2>Live metrics</h2>
+  <div class="grid" id="grid-metrics"></div>
+</div>
+
+<div id="tab-config" class="tab">
+  <h2>Configuration</h2>
+  <form onsubmit="saveConfig(event)">
+    <label for="cfg-ssid">Access point name</label>
+    <input id="cfg-ssid" maxlength="32">
+    <label for="cfg-pass">Access point password (leave blank to keep current)</label>
+    <input id="cfg-pass" type="password" maxlength="64">
+    <label for="cfg-boot">Boot message</label>
+    <input id="cfg-boot" maxlength="60">
+    <label for="cfg-symbol">Stock ticker (e.g. SPCX, TSLA, AAPL)</label>
+    <input id="cfg-symbol" maxlength="7" style="text-transform:uppercase">
+    <button>Save config</button>
+    <button type="button" class="danger" style="margin-left:8px" onclick="reboot()">Reboot</button>
+    <div class="note" id="cfg-result">Access point changes take effect after a reboot.</div>
+  </form>
+
+  <h2>Device</h2>
+  <div class="grid" id="grid-device"></div>
+</div>
+
+<script>
+function fmtStock(v, d) {
+  return d.stock_error
+    ? (v || '?') + ': ' + d.stock_error
+    : v + '  $' + d.stock_price.toFixed(2) +
+      ' (' + (d.stock_change_pct >= 0 ? '+' : '') +
+      d.stock_change_pct.toFixed(2) + '%)';
+}
+
+function formatUptime(s) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h + 'h ' + m + 'm ' + (s % 60) + 's';
+}
+
+/* [json key, label, formatter] per grid */
+const GRIDS = {
+  'grid-main': [
+    ['stock_symbol', 'Stock',        fmtStock],
+    ['oled_message', 'OLED shows',   (v, d) => d.display_mode === 'stock'
+                                       ? 'stock price' : (v || '(boot screen)')],
+    ['ip',           'IP address',   v => v],
+    ['uptime',       'Uptime',       v => formatUptime(v)],
+  ],
+  'grid-metrics': [
+    ['stock_symbol',  'Stock',         fmtStock],
+    ['uptime',        'Uptime',        v => formatUptime(v)],
+    ['free_heap',     'Free heap',     v => (v / 1024).toFixed(1) + ' KiB'],
+    ['min_free_heap', 'Min free heap', v => (v / 1024).toFixed(1) + ' KiB'],
+    ['rssi',          'Wi-Fi signal',  v => v + ' dBm'],
+    ['ssid',          'Access point',  v => v],
+    ['ip',            'IP address',    v => v],
+    ['oled_message',  'OLED shows',    v => v || '(boot screen)'],
+  ],
+  'grid-device': [
+    ['chip',         'Chip',           v => v],
+    ['idf_version',  'ESP-IDF',        v => v],
+    ['compile_time', 'Firmware built', v => v],
+    ['reset_reason', 'Last reset',     v => v],
+  ],
+};
+
+function render(data) {
+  for (const [gridId, entries] of Object.entries(GRIDS)) {
+    document.getElementById(gridId).innerHTML = entries.map(([key, label, fmt]) =>
+      '<div class="card"><div class="label">' + label + '</div>' +
+      '<div class="value">' + fmt(data[key], data) + '</div></div>').join('');
+  }
+  syncMode(data.display_mode);
+}
+
+function showTab(name) {
+  for (const t of ['main', 'metrics', 'config']) {
+    document.getElementById('tab-' + t).classList.toggle('active', t === name);
+    document.getElementById('tab-btn-' + t).classList.toggle('active', t === name);
+  }
+}
+
+function syncMode(mode) {
+  const stock = mode === 'stock';
+  document.getElementById('mode-stock').classList.toggle('active', stock);
+  document.getElementById('mode-message').classList.toggle('active', !stock);
+  document.getElementById('msg').disabled = stock;
+  document.getElementById('msg-send').disabled = stock;
+}
+
+async function poll() {
+  const dot = document.getElementById('dot');
+  const conn = document.getElementById('conn');
+  try {
+    const r = await fetch('/api/status');
+    render(await r.json());
+    dot.classList.remove('offline');
+    conn.textContent = 'online';
+  } catch (e) {
+    dot.classList.add('offline');
+    conn.textContent = 'unreachable';
+  }
+}
+
+async function setMode(mode) {
+  await fetch('/api/mode', { method: 'POST', body: mode });
+  syncMode(mode);
+  document.getElementById('msg-result').textContent =
+    mode === 'stock'
+      ? 'OLED is showing the stock price.'
+      : 'OLED is in message mode - type below.';
+}
+
+async function loadConfig() {
+  const r = await fetch('/api/config');
+  const cfg = await r.json();
+  document.getElementById('cfg-ssid').value = cfg.wifi_ssid;
+  document.getElementById('cfg-boot').value = cfg.boot_message;
+  document.getElementById('cfg-symbol').value = cfg.stock_symbol;
+}
+
+async function sendMessage(ev) {
+  ev.preventDefault();
+  const r = await fetch('/api/display', {
+    method: 'POST',
+    body: document.getElementById('msg').value,
+  });
+  document.getElementById('msg-result').textContent =
+    r.ok ? 'Displayed!' : 'Error: ' + await r.text();
+}
+
+async function saveConfig(ev) {
+  ev.preventDefault();
+  const body = {
+    wifi_ssid: document.getElementById('cfg-ssid').value,
+    boot_message: document.getElementById('cfg-boot').value,
+    stock_symbol: document.getElementById('cfg-symbol').value,
+  };
+  const pass = document.getElementById('cfg-pass').value;
+  if (pass) body.wifi_password = pass;
+  const r = await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  document.getElementById('cfg-result').textContent =
+    r.ok ? 'Saved. Reboot to apply access point changes.' : 'Error: ' + await r.text();
+}
+
+async function reboot() {
+  await fetch('/api/reboot', { method: 'POST' });
+  document.getElementById('cfg-result').textContent = 'Rebooting…';
+}
+
+poll();
+loadConfig();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
