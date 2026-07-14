@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>maddox-os host</title>
+<style>
+  :root {
+    --tile-a:#d32f2f;
+    --tile-b:#1976d2;
+    --tile-c:#f9a825;
+    --tile-d:#388e3c;
+  }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,sans-serif; background:#fff; color:#000; margin:0; padding:24px; max-width:900px; margin-inline:auto; }
+  h1 { color:#000; margin:0 0 4px; }
+  h2 { font-size:1rem; color:#000; text-transform:uppercase; letter-spacing:1px; margin:28px 0 12px; }
+  .sub { color:#000; margin:0 0 20px; opacity:.72; }
+  .panel { background:#fff; border:1px solid #000; border-radius:8px; padding:16px; margin-bottom:14px; }
+  .question { font-size:1.25rem; line-height:1.35; margin:0; }
+  .controls { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+  button { font-size:1rem; padding:10px 14px; border:1px solid #000; border-radius:8px; background:#000; color:#fff; font-weight:700; }
+  button.secondary, button.danger { background:#fff; color:#000; }
+  .answers { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+  .tile { min-height:132px; border-radius:8px; padding:14px; display:grid; grid-template-rows:auto 1fr auto; gap:10px; color:white; }
+  .tile-0 { background:var(--tile-a); }
+  .tile-1 { background:var(--tile-b); }
+  .tile-2 { background:var(--tile-c); color:#000; }
+  .tile-3 { background:var(--tile-d); }
+  .choice { font-size:2rem; line-height:1; font-weight:900; }
+  .answer { font-size:1.05rem; line-height:1.25; font-weight:800; align-self:center; }
+  .result { font-size:.95rem; font-weight:800; opacity:.9; }
+  .bar { height:12px; background:rgba(0,0,0,.25); border-radius:6px; overflow:hidden; margin-top:8px; }
+  .fill { height:100%; background:rgba(255,255,255,.85); width:0%; transition:width .2s; }
+  .correct { outline:4px solid #fff; outline-offset:-8px; }
+  .muted { color:#000; opacity:.72; }
+  .pill { display:inline-block; background:#fff; color:#000; border:1px solid #000; border-radius:999px; padding:4px 9px; margin-right:6px; }
+  @media (max-width:640px) { .answers { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<h1>maddox-os host</h1>
+<p class="sub">Players join <strong>Maddox-OS</strong> and open <strong>http://192.168.4.1/player</strong></p>
+
+<div class="panel">
+  <div><span class="pill" id="phase">idle</span><span class="pill" id="count">0 / 0</span><span class="pill" id="votes">0 votes</span></div>
+  <h2>Question</h2>
+  <p class="question" id="question">Press Start Session.</p>
+  <div class="controls">
+    <button onclick="post('/api/game/start')">Start / Next</button>
+    <button class="secondary" onclick="post('/api/game/reveal')">Reveal Answer</button>
+    <button class="danger" onclick="post('/api/game/reset')">Reset</button>
+  </div>
+</div>
+
+<h2>Results</h2>
+<div class="answers" id="results"></div>
+
+<script>
+let state = null;
+
+async function post(url) {
+  await fetch(url, { method: 'POST' });
+  await load();
+}
+
+function pct(v, total) {
+  return total ? Math.round((v / total) * 100) : 0;
+}
+
+function render(s) {
+  state = s;
+  document.getElementById('phase').textContent = s.phase;
+  document.getElementById('count').textContent =
+    s.question_index >= 0 ? (s.question_index + 1) + ' / ' + s.question_count : '0 / ' + s.question_count;
+  document.getElementById('votes').textContent = s.total_votes + ' votes';
+  document.getElementById('question').textContent =
+    s.question || (s.phase === 'done' ? 'Session complete.' : 'Press Start Session.');
+
+  const revealed = s.phase === 'revealed';
+  document.getElementById('results').innerHTML = (s.options || []).map((label, i) => {
+    const votes = s.votes[i] || 0;
+    const isCorrect = revealed && i === s.correct_index;
+    return '<div class="tile tile-' + i + ' ' + (isCorrect ? 'correct' : '') + '">' +
+      '<div class="choice">' + String.fromCharCode(65 + i) + '</div>' +
+      '<div class="answer">' + label + '</div>' +
+      '<div class="result">' + votes + ' votes · ' + pct(votes, s.total_votes) + '%' +
+      (isCorrect ? ' · correct' : '') +
+      '<div class="bar"><div class="fill" style="width:' + pct(votes, s.total_votes) + '%"></div></div></div>' +
+      '</div>';
+  }).join('');
+}
+
+async function load() {
+  const r = await fetch('/api/game/state');
+  render(await r.json());
+}
+
+load();
+setInterval(load, 800);
+</script>
+</body>
+</html>
